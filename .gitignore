@@ -1,0 +1,20 @@
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Pycache
+__pycache__/
+*.py[cod]
+
+# Data and MLflow tracking
+dataset/
+mlruns/
+mlflow.db
+model_status.txt
+model_info.txt
+
+# VS Code
+.vscode/
