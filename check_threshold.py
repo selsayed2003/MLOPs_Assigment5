@@ -14,24 +14,29 @@ except FileNotFoundError:
     sys.exit(1)
 
 # 2. Fetch the run data from MLflow
+# 2. Fetch the run data from MLflow
 try:
     run = mlflow.get_run(run_id)
     
-    # Fetch the 'accuracy_Real' metric from the last epoch.
-    # Note: Your train.py calculates accuracy as a percentage (e.g., 85.0 instead of 0.85).
-    # We divide by 100 to get the 0.0 to 1.0 format required by your assignment.
-    acc_real_percentage = run.data.metrics.get("accuracy_Real", 0.0)
-    accuracy = acc_real_percentage / 100.0
+    # Get the raw value from DagsHub
+    raw_acc = run.data.metrics.get("accuracy_Real", 0.0)
     
-    print(f"Validation Accuracy: {accuracy:.2f}")
+    # Smart check: if the number is > 1.0, it's a percentage (like 85.0)
+    # If it's <= 1.0, it's already a decimal (like 0.85)
+    if raw_acc > 1.0:
+        accuracy = raw_acc / 100.0
+    else:
+        accuracy = raw_acc
+    
+    print(f"Validation Accuracy: {accuracy:.4f}")
 
     # 3. Check the threshold
     if accuracy < 0.85:
-        print("❌ Pipeline Failed: Accuracy is below the 0.85 threshold.")
-        sys.exit(1) # This specific exit code tells GitHub Actions to fail the job and stop
+        print(f"❌ Pipeline Failed: Accuracy {accuracy:.2f} is below the 0.85 threshold.")
+        sys.exit(1)
     else:
-        print("✅ Pipeline Passed: Accuracy meets the threshold.")
-        sys.exit(0) # This tells GitHub Actions to proceed to the Docker build
+        print(f"✅ Pipeline Passed: Accuracy {accuracy:.2f} meets the threshold.")
+        sys.exit(0)
 
 except Exception as e:
     print(f"Error connecting to MLflow: {e}")
