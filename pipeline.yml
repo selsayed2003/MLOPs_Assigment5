@@ -1,78 +1,172 @@
+# .github/workflows/pipeline.yml
+#
+# ═══════════════════════════════════════════════════════════════════
+#  GAN Validation and Deployment Pipeline
+# ═══════════════════════════════════════════════════════════════════
+#  Two-job pipeline:
+#    Job 1 (validate) → trains the model, logs to MLflow, saves Run ID
+#    Job 2 (deploy)   → only runs if Job 1 passed, checks accuracy,
+#                       then does a mock Docker build
+# ═══════════════════════════════════════════════════════════════════
+
 name: GAN Validation and Deployment
 
+# ── When does this pipeline trigger? ────────────────────────────────
 on:
   push:
-    branches: [ "main" ]
-  workflow_dispatch: # This allows you to click a "Run workflow" button in GitHub to test it manually!
+    branches: [ "main" ]     # Auto-runs whenever you push to main
+  workflow_dispatch:          # Adds a manual "Run workflow" button in GitHub UI
 
+# ═══════════════════════════════════════════════════════════════════
+#  JOB 1 — VALIDATE
+#  Runs on a fresh Ubuntu VM, trains the GAN, saves the MLflow Run ID
+# ═══════════════════════════════════════════════════════════════════
 jobs:
   validate:
     name: Validation Job
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest   # GitHub spins up a clean Ubuntu machine for this job
+
     steps:
+
+      # ── Step 1: Get your code onto the runner ──────────────────────
+      # actions/checkout@v4 is an official GitHub Action that does
+      # "git clone" of your repository into the runner's workspace.
+      # Without this, the runner has no access to your files.
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ── Step 2: Install Python ─────────────────────────────────────
+      # Sets up the exact Python version we need.
+      # python-version: '3.10' matches what we developed with locally.
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
+      # ── Step 3: Install Python packages ───────────────────────────
+      # pip install everything train.py needs.
+      # dvc    → to pull the dataset from remote storage
+      # torch  → PyTorch for the GAN model
+      # mlflow → experiment tracking
       - name: Install Dependencies
         run: |
           pip install torch torchvision dvc mlflow
-          
+
+      # ── Step 4: Pull training data via DVC ────────────────────────
+      # DVC (Data Version Control) stores large files (datasets) in a
+      # remote like S3/GDrive instead of Git.
+      # "dvc pull" downloads the dataset that .dvc files point to.
+      # NOTE: if you haven't set up a DVC remote yet, you can replace
+      #       this step with the MNIST auto-download that train.py does.
       - name: Pull Data via DVC
         run: dvc pull
 
+      # ── Step 5: Train the model ────────────────────────────────────
+      # This runs your train.py script.
+      # The env block injects your DagsHub/MLflow credentials as
+      # environment variables so train.py can talk to the tracking server.
+      #
+      # NEVER put real credentials in the YAML — always use secrets!
+      # Go to: GitHub repo → Settings → Secrets and variables → Actions
+      # Add three secrets:
+      #   MLFLOW_TRACKING_URI      = https://dagshub.com/<user>/<repo>.mlflow
+      #   MLFLOW_TRACKING_USERNAME = your DagsHub username
+      #   MLFLOW_TRACKING_PASSWORD = your DagsHub token
       - name: Train Model
         env:
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_URI:      ${{ secrets.MLFLOW_TRACKING_URI }}
           MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
         run: python train.py
 
+      # ── Step 6: Upload model_info.txt as a pipeline artifact ───────
+      # train.py writes the MLflow Run ID into model_info.txt.
+      # "upload-artifact" packages that file and stores it on GitHub's
+      # servers so the NEXT JOB can download it.
+      #
+      # Jobs run on separate VMs — they cannot share files directly.
+      # Artifacts are the bridge between jobs.
+      #
+      # retention-days: 1 → auto-delete after 1 day (saves storage quota)
       - name: Persist Run ID Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: run-id-artifact
-          path: model_info.txt
+          name: run-id-artifact      # logical name used by download-artifact
+          path: model_info.txt       # the actual file to upload
           retention-days: 1
 
+
+# ═══════════════════════════════════════════════════════════════════
+#  JOB 2 — DEPLOY
+#  Only runs if Job 1 succeeded (needs: validate).
+#  Downloads the Run ID → checks accuracy → mock Docker build.
+# ═══════════════════════════════════════════════════════════════════
   deploy:
     name: Deployment Job
-    needs: validate # This ensures deployment ONLY happens if validation succeeds
+    needs: validate            # ← KEY LINE: deploy waits for validate to finish.
+                               # If validate fails, deploy is SKIPPED entirely.
     runs-on: ubuntu-latest
+
     steps:
+
+      # ── Step 1: Checkout code (needed for check_threshold.py & Dockerfile) ──
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ── Step 2: Give MLflow time to finish syncing ─────────────────
+      # DagsHub (and some remote MLflow servers) can take a few seconds
+      # to finish writing all metric data after the run ends.
+      # This sleep prevents a race condition where check_threshold.py
+      # reads metrics before they're fully committed to the server.
       - name: Wait for DagsHub to Sync
         run: sleep 15
 
+      # ── Step 3: Python setup ───────────────────────────────────────
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
+      # ── Step 4: Install MLflow (all we need in this job) ──────────
+      # We don't need torch here — we're only reading metrics, not training.
       - name: Install MLflow
         run: pip install mlflow
 
+      # ── Step 5: Download the artifact from Job 1 ──────────────────
+      # "download-artifact" fetches the file uploaded in the validate job.
+      # name: must match exactly what upload-artifact used.
+      # path: . → download into the current directory (project root)
+      # After this step, model_info.txt exists on this runner.
       - name: Download Run ID Artifact
         uses: actions/download-artifact@v4
         with:
           name: run-id-artifact
           path: .
 
+      # ── Step 6: THE GATE — check accuracy threshold ────────────────
+      # check_threshold.py reads model_info.txt → connects to MLflow →
+      # reads accuracy metrics → calls sys.exit(1) if accuracy < 85%.
+      # If it exits with 1, GitHub Actions marks this step (and the job)
+      # as FAILED and stops here. The Docker build step never runs.
       - name: Check Accuracy Threshold
         env:
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_URI:      ${{ secrets.MLFLOW_TRACKING_URI }}
           MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
         run: python check_threshold.py
 
+      # ── Step 7: Mock Docker Build ──────────────────────────────────
+      # This step only runs if check_threshold.py exited with 0 (passed).
+      # It reads the Run ID from model_info.txt and builds a Docker image
+      # using the Dockerfile in your repo root.
+      #
+      # In a real project this image would be pushed to a container
+      # registry (DockerHub, ECR, etc.) and deployed to a server.
+      # Here it's a "mock build" — it builds locally on the runner
+      # just to prove the pipeline works end-to-end.
       - name: Containerize (Mock Docker Build)
         run: |
           RUN_ID=$(cat model_info.txt)
           echo "Building Docker image for Run ID: $RUN_ID"
           docker build --build-arg RUN_ID=$RUN_ID -t my-gan-model:latest .
+          echo "✅ Docker image built successfully: my-gan-model:latest"
