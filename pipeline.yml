@@ -28,7 +28,9 @@ jobs:
       - name: Train Model
         env:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-        run: python gan1.py
+          MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+        run: python train.py
 
       - name: Persist Run ID Artifact
         uses: actions/upload-artifact@v4
@@ -61,6 +63,8 @@ jobs:
       - name: Check Accuracy Threshold
         env:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
         run: python check_threshold.py
 
       - name: Containerize (Mock Docker Build)
