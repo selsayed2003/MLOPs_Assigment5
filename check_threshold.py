@@ -1,5 +1,8 @@
 import sys
 import mlflow
+import os
+
+mlflow.set_tracking_uri(os.environ.get('MLFLOW_TRACKING_URI'))
 
 # 1. Read the Run ID saved by train.py
 try:

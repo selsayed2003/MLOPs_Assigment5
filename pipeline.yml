@@ -47,6 +47,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Wait for DagsHub to Sync
+        run: sleep 15
+        
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
