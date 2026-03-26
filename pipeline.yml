@@ -27,9 +27,10 @@ jobs:
 
       - name: Train Model
         env:
-          # This secret needs to be set in your GitHub Repo Settings
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }} 
-        run: python train.py
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+        run: python gan1.py
 
       - name: Persist Run ID Artifact
         uses: actions/upload-artifact@v4
