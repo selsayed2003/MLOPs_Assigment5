@@ -10,7 +10,7 @@ import mlflow.pytorch
 print("--- Script Started ---")
 
 # --- MLflow Pillar: Set Experiment Name ---
-mlflow.set_experiment("Assignment3_SarahElsayed")
+mlflow.set_experiment("Assignment5_SarahElsayed")
 
 # Networks
 class Discriminator(nn.Module):
