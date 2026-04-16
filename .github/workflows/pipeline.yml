@@ -1,74 +1,131 @@
-name: GAN Validation and Deployment
+# Assigment 5
+# name: GAN Validation and Deployment
 
-on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch: # This allows you to click a "Run workflow" button in GitHub to test it manually!
+# on:
+#   push:
+#     branches: [ "main" ]
+#   workflow_dispatch: # This allows you to click a "Run workflow" button in GitHub to test it manually!
+
+# jobs:
+#   validate:
+#     name: Validation Job
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v4
+
+#       - name: Set up Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: '3.10'
+
+#       - name: Install Dependencies
+#         run: |
+#           pip install torch torchvision dvc mlflow
+          
+#       - name: Pull Data via DVC
+#         run: dvc pull
+
+#       - name: Train Model
+#         env:
+#           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+#           MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+#           MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+#         run: python train.py
+
+#       - name: Persist Run ID Artifact
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: run-id-artifact
+#           path: model_info.txt
+#           retention-days: 1
+
+#   deploy:
+#     name: Deployment Job
+#     needs: validate # This ensures deployment ONLY happens if validation succeeds
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v4
+
+#       - name: Set up Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: '3.10'
+
+#       - name: Install MLflow
+#         run: pip install mlflow
+
+#       - name: Download Run ID Artifact
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: run-id-artifact
+
+#       - name: Check Accuracy Threshold
+#         env:
+#           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+#           MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+#           MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+#         run: python check_threshold.py
+
+#       - name: Containerize (Mock Docker Build)
+#         run: |
+#           RUN_ID=$(cat model_info.txt)
+#           echo "Building Docker image for Run ID: $RUN_ID"
+#           docker build --build-arg RUN_ID=$RUN_ID -t my-gan-model:latest .
+
+
+
+
+# Assigment 6
+
+name: CI/CD Resource Governance
+
+on: [push, pull_request]
 
 jobs:
-  validate:
-    name: Validation Job
+  # Task 1: The Lightweight Gatekeeper
+  linter:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - name: Run Linter
+        run: echo "Running lightweight linting checks..."
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install Dependencies
+  # Task 1 & 2: The Conditional Train Job
+  train:
+    runs-on: ubuntu-latest # In a real scenario, this would be a GPU runner
+    needs: linter
+    # Conditions: Linter passed AND branch is main AND commit contains [run-train]
+    if: |
+      github.ref == 'refs/heads/main' && 
+      contains(github.event.head_commit.message, '[run-train]')
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Training Model
         run: |
-          pip install torch torchvision dvc mlflow
-          
-      - name: Pull Data via DVC
-        run: dvc pull
+          echo "Starting expensive GPU training..."
+          # Simulating a potential failure for Task 2 demonstration
+          # exit 1 
+      
+      # Task 2: Error Handling & Artifact Upload
+      - name: Capture Error Logs
+        if: failure()
+        run: echo "Search for GPU memory errors or syntax issues here" > error_logs.txt
 
-      - name: Train Model
-        env:
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-          MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
-          MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
-        run: python train.py
-
-      - name: Persist Run ID Artifact
+      - name: Upload Error Artifact
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: run-id-artifact
-          path: model_info.txt
-          retention-days: 1
+          name: training-errors
+          path: error_logs.txt
 
-  deploy:
-    name: Deployment Job
-    needs: validate # This ensures deployment ONLY happens if validation succeeds
+  # Task 3: Final Cleanup
+  cleanup:
     runs-on: ubuntu-latest
+    needs: [linter, train]
+    if: always()
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install MLflow
-        run: pip install mlflow
-
-      - name: Download Run ID Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: run-id-artifact
-
-      - name: Check Accuracy Threshold
-        env:
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-          MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
-          MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
-        run: python check_threshold.py
-
-      - name: Containerize (Mock Docker Build)
-        run: |
-          RUN_ID=$(cat model_info.txt)
-          echo "Building Docker image for Run ID: $RUN_ID"
-          docker build --build-arg RUN_ID=$RUN_ID -t my-gan-model:latest .
+      - name: Post-run Cleanup
+        run: echo "Cleaning up temporary cloud volumes..."
